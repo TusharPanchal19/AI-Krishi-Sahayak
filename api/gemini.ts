@@ -19,15 +19,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === "chat") {
-      const { history = [], newMessage, language } = payload;
+      const { history = [], newMessage } = payload;
 
       const formattedHistory = history.map((msg: any) => ({
-        role: msg.role,
+        role: msg.role === "assistant" ? "model" : "user",
         parts: [{ text: msg.content }],
       }));
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-1.5-flash", // ✅ STABLE MODEL
         contents: [
           ...formattedHistory,
           { role: "user", parts: [{ text: newMessage }] },
