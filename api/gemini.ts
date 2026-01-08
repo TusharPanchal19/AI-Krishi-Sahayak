@@ -1,7 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY!,
+});
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -11,35 +13,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { action, payload } = req.body;
 
-    // BASIC HEALTH CHECK
+    // Health check
     if (!action) {
       return res.status(200).json({ message: "API working" });
     }
 
-    // CHATBOT
     if (action === "chat") {
-      const { history, newMessage, language } = payload;
+      const { history = [], newMessage, language } = payload;
 
-      const model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash"
+      const formattedHistory = history.map((msg: any) => ({
+        role: msg.role,
+        parts: [{ text: msg.content }],
+      }));
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          ...formattedHistory,
+          { role: "user", parts: [{ text: newMessage }] },
+        ],
       });
 
-      const chat = model.startChat({
-        history: history.map((m: any) => ({
-          role: m.role,
-          parts: [{ text: m.content }]
-        }))
+      return res.status(200).json({
+        reply: response.text,
       });
-
-      const result = await chat.sendMessage(newMessage);
-      const reply = result.response.text();
-
-      return res.status(200).json({ reply });
     }
 
     return res.status(400).json({ error: "Unknown action" });
-  } catch (err: any) {
-    console.error("Gemini API error:", err);
-    return res.status(500).json({ error: "Gemini API failed" });
+  } catch (error: any) {
+    console.error("Gemini backend error:", error);
+    return res.status(500).json({
+      error: "Gemini API failed",
+      details: error?.message || "Unknown error",
+    });
   }
 }
