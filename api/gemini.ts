@@ -42,11 +42,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const data = await response.json();
 
-      const reply =
-        data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        "Sorry, I couldn't understand.";
+     const reply =
+  data?.candidates?.[0]?.content?.parts
+    ?.map((p: any) => p.text)
+    .join(" ") || "No response from Gemini";
 
-      return res.status(200).json({ reply });
+return res.status(200).json({ reply });
+
     }
 
     return res.status(400).json({ error: "Unknown action" });
