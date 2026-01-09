@@ -42,9 +42,11 @@ export async function getSchemeAnalysis(
     })
   });
 
-  if (!res.ok) {
-    throw new Error("Scheme analysis API failed");
-  }
+if (!res.ok) {
+  const err = await res.text();
+  throw new Error(err);
+}
+
 
   const data = await res.json();
   return data;
