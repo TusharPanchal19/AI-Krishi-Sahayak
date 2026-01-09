@@ -1,9 +1,4 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { GoogleGenAI } from "@google/genai";
-
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY!,
-});
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -12,8 +7,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const { action, payload } = req.body;
+    const apiKey = process.env.GEMINI_API_KEY;
 
-    // Health check
+    if (!apiKey) {
+      return res.status(500).json({ error: "Missing GEMINI_API_KEY" });
+    }
+
     if (!action) {
       return res.status(200).json({ message: "API working" });
     }
@@ -21,30 +20,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === "chat") {
       const { history = [], newMessage } = payload;
 
-      const formattedHistory = history.map((msg: any) => ({
-        role: msg.role === "assistant" ? "model" : "user",
-        parts: [{ text: msg.content }],
-      }));
+      const contents = [
+        ...history.map((m: any) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }]
+        })),
+        {
+          role: "user",
+          parts: [{ text: newMessage }]
+        }
+      ];
 
-      const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash", // ✅ STABLE MODEL
-        contents: [
-          ...formattedHistory,
-          { role: "user", parts: [{ text: newMessage }] },
-        ],
-      });
+      const response = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents })
+        }
+      );
 
-      return res.status(200).json({
-        reply: response.text,
-      });
+      const data = await response.json();
+
+      const reply =
+        data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+        "Sorry, I couldn't understand.";
+
+      return res.status(200).json({ reply });
     }
 
     return res.status(400).json({ error: "Unknown action" });
-  } catch (error: any) {
-    console.error("Gemini backend error:", error);
-    return res.status(500).json({
-      error: "Gemini API failed",
-      details: error?.message || "Unknown error",
-    });
+  } catch (err: any) {
+    console.error("Gemini error:", err);
+    return res.status(500).json({ error: err.message });
   }
 }
