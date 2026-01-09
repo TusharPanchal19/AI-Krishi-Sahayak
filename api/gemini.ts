@@ -13,47 +13,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: "Missing GEMINI_API_KEY" });
     }
 
-    if (!action) {
-      return res.status(200).json({ message: "API working" });
+    if (action !== "chat") {
+      return res.status(400).json({ error: "Unsupported action" });
     }
 
-    if (action === "chat") {
-      const { history = [], newMessage } = payload;
+    const { history = [], newMessage } = payload;
 
-      const contents = [
-        ...history.map((m: any) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }]
-        })),
-        {
-          role: "user",
-          parts: [{ text: newMessage }]
-        }
-      ];
+    const contents = [
+      ...history.map((m: any) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }]
+      })),
+      {
+        role: "user",
+        parts: [{ text: newMessage }]
+      }
+    ];
 
-      const response = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents })
-        }
-      );
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents,
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 512
+          }
+        })
+      }
+    );
 
-      const data = await response.json();
+    const data = await geminiRes.json();
 
-     const reply =
-  data?.candidates?.[0]?.content?.parts
-    ?.map((p: any) => p.text)
-    .join(" ") || "No response from Gemini";
+    const reply =
+      data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join("") ||
+      "Gemini did not return a response.";
 
-return res.status(200).json({ reply });
-
-    }
-
-    return res.status(400).json({ error: "Unknown action" });
+    return res.status(200).json({ reply });
   } catch (err: any) {
-    console.error("Gemini error:", err);
+    console.error("Gemini API error:", err);
     return res.status(500).json({ error: err.message });
   }
 }
