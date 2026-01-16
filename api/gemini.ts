@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // 1. CORS Headers
   res.setHeader('Access-Control-Allow-Credentials', "true");
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -9,33 +10,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "Missing API Key" });
-
-  const { action, payload } = req.body;
-
-  // HELPER: Function to call Gemini with a specific model
-  async function callGemini(modelName: string, requestBody: any) {
-    console.log(`Attempting with model: ${modelName}`);
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody)
-      }
-    );
-    const data = await response.json();
-    return { ok: response.ok, status: response.status, data };
-  }
-
   try {
+    const { action, payload } = req.body;
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) return res.status(500).json({ error: "Missing API Key" });
+
     let contents = [];
     let systemInstructionText = "";
-    let generationConfig = {};
-    let isJsonMode = false;
 
-    // --- SETUP PROMPTS ---
+    // ==========================================
+    // CASE 1: CHATBOT
+    // ==========================================
     if (action === "chat") {
       const { history = [], newMessage } = payload;
       systemInstructionText = "You are AI Krishi Sahayak, an expert agricultural assistant. Provide detailed, helpful advice on farming, crops, and government schemes. Use bullet points.";
@@ -47,87 +33,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })),
         { role: "user", parts: [{ text: newMessage }] }
       ];
-      generationConfig = { temperature: 0.7, maxOutputTokens: 2000 };
     } 
+    
+    // ==========================================
+    // CASE 2: SCHEME ANALYSIS (Fixes your Error)
+    // ==========================================
     else if (action === "analysis") {
       const { farmerData, scheme, language } = payload;
-      systemInstructionText = "You are an API that outputs strictly valid JSON.";
+      systemInstructionText = "You are an expert government scheme analyst for Indian farmers.";
+      
+      // Create a specific prompt for analysis
       const analysisPrompt = `
-        Analyze the scheme "${scheme?.name || 'this scheme'}" for a farmer:
+        Analyze the scheme "${scheme?.name || 'this scheme'}" for a farmer with these details:
         - State: ${farmerData?.state}
+        - Crop: ${farmerData?.crop}
         - Income: ₹${farmerData?.income}
-        Return valid JSON with two fields: "explanation" (string with 3 bullets) and "documents" (array of strings).
-        ${language === 'hi' ? 'Output in Hindi.' : 'Output in English.'}
+        
+        Explain strictly in 3-4 short bullet points why this scheme is specifically recommended for them.
+        ${language === 'hi' ? 'Reply in Hindi.' : 'Reply in English.'}
       `;
+
       contents = [{ role: "user", parts: [{ text: analysisPrompt }] }];
-      generationConfig = { temperature: 0.3, maxOutputTokens: 1000, responseMimeType: "application/json" };
-      isJsonMode = true;
-    } 
+    }
+    
+    // CASE 3: UNSUPPORTED
     else {
       return res.status(400).json({ error: `Unsupported action: ${action}` });
     }
 
-    // --- PREPARE REQUEST BODY ---
-    // Note: We move systemInstruction to the "contents" for maximum compatibility if needed, 
-    // but v1beta supports systemInstruction field. We will stick to the standard structure.
-    const requestBody = {
-      systemInstruction: { parts: [{ text: systemInstructionText }] },
-      contents,
-      safetySettings: [
-        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-      ],
-      generationConfig
-    };
-
-    // --- ATTEMPT 1: gemini-1.5-flash (Standard) ---
-    // This gave us a 503 before, which means it EXISTS.
-    let result = await callGemini("gemini-1.5-flash", requestBody);
-
-    // --- ATTEMPT 2: Fallback to gemini-pro if Flash fails ---
-    // If Flash is 404 or 503, try the older robust model
-    if (!result.ok) {
-      console.warn(`Primary model failed (${result.status}). Trying fallback...`);
-      // gemini-pro doesn't support systemInstruction or JSON mode well, so we adapt slightly
-      const fallbackBody = { ...requestBody };
-      delete fallbackBody.systemInstruction; // Remove incompatible field
-      delete fallbackBody.generationConfig;  // Remove potential JSON config
-      
-      // Inject system instruction into the first prompt instead
-      fallbackBody.contents[0].parts[0].text = systemInstructionText + "\n\n" + fallbackBody.contents[0].parts[0].text;
-      
-      result = await callGemini("gemini-pro", fallbackBody);
-    }
-
-    // --- FINAL ERROR CHECK ---
-    if (!result.ok) {
-      console.error("All models failed:", JSON.stringify(result.data, null, 2));
-      return res.status(result.status).json({ error: result.data.error?.message || "AI Busy. Try again." });
-    }
-
-    const rawText = result.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) return res.status(500).json({ error: "Empty response" });
-
-    // --- HANDLE RESPONSE ---
-    if (action === "analysis") {
-      try {
-        // If we used the fallback (gemini-pro), it returns text, not JSON. We try to parse, else wrap it.
-        // Clean markdown code blocks if present (```json ... ```)
-        const cleanText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(cleanText);
-        return res.status(200).json({ 
-          why: parsed.explanation || "Analysis available.", 
-          documents: parsed.documents || [] 
-        });
-      } catch (e) {
-        console.error("JSON Parse Failed (using fallback text):", rawText);
-        // If JSON fails, just put the raw text in the 'why' field
-        return res.status(200).json({ why: rawText, documents: ["Check scheme details for documents."] });
+    // --- CALL GEMINI API ---
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstructionText }] },
+          contents,
+          safetySettings: [
+            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+          ],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1000 
+          }
+        })
       }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        console.error("Gemini API Error:", JSON.stringify(data, null, 2));
+        return res.status(response.status).json({ error: data.error?.message || "API Request Failed" });
+    }
+
+    const textResponse = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Analysis not available.";
+
+    // --- RETURN RESPONSE BASED ON ACTION ---
+    if (action === "analysis") {
+        // The frontend expects a 'why' field for analysis
+        return res.status(200).json({ why: textResponse, documents: [] });
     } else {
-      return res.status(200).json({ reply: rawText });
+        // The chatbot expects a 'reply' field
+        return res.status(200).json({ reply: textResponse });
     }
 
   } catch (err: any) {
