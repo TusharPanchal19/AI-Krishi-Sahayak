@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // 1. Handle CORS (Optional but recommended)
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -24,6 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { history = [], newMessage } = payload;
 
+    // 2. Format History
     const contents = [
       ...history.map((m: any) => ({
         role: m.role === "assistant" ? "model" : "user",
@@ -35,13 +37,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     ];
 
-    // UPDATED: Using 'gemini-2.5-flash' instead of the retired 1.5 version
+    // 3. API Call
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // NEW: System Instruction to make it an Expert
+          systemInstruction: {
+            parts: [{ text: "You are AI Krishi Sahayak, an expert agricultural assistant for Indian farmers. Provide detailed, step-by-step advice on farming, crops, and government schemes. Use bullet points and clear paragraphs." }]
+          },
           contents,
           safetySettings: [
             { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
@@ -51,7 +57,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 512
+            // CRITICAL FIX: Increased from 512 to 4096
+            maxOutputTokens: 4096 
           }
         })
       }
@@ -61,7 +68,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!response.ok) {
         console.error("Gemini API Error:", JSON.stringify(data, null, 2));
-        // Use a clearer error message for the frontend
         return res.status(response.status).json({ error: data.error?.message || "API Request Failed" });
     }
 
