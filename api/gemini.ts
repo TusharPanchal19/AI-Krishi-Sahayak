@@ -16,6 +16,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!apiKey) return res.status(500).json({ error: "Missing API Key" });
 
+    // 2. CONFIGURATION
+    // We use "gemini-1.5-flash-8b" which is the latest stable, high-speed model.
+    // If this ever fails, fallback to "gemini-1.5-flash-002"
+    const MODEL_NAME = "gemini-1.5-flash-8b"; 
+    
     let contents = [];
     let systemInstructionText = "";
     let generationConfig = {};
@@ -47,7 +52,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     else if (action === "analysis") {
       const { farmerData, scheme, language } = payload;
       
-      // We force the system to act as a JSON generator
       systemInstructionText = "You are an API that outputs strictly valid JSON.";
 
       const analysisPrompt = `
@@ -67,16 +71,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       generationConfig = {
         temperature: 0.3,
         maxOutputTokens: 1000,
-        responseMimeType: "application/json" // This forces the "documents" array to be created correctly
+        responseMimeType: "application/json" // Forces valid JSON for the documents list
       };
     } 
     else {
       return res.status(400).json({ error: `Unsupported action: ${action}` });
     }
 
-    // --- CALL GEMINI API (Switched back to 1.5-flash for stability) ---
+    // --- CALL GEMINI API ---
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -97,7 +101,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const data = await response.json();
 
     if (!response.ok) {
-        // If 1.5 Flash fails, check logs. 
         console.error("Gemini API Error:", JSON.stringify(data, null, 2));
         return res.status(response.status).json({ error: data.error?.message || "API Request Failed" });
     }
@@ -117,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
         } catch (e) {
             console.error("JSON Parsing Failed:", rawText);
-            return res.status(200).json({ why: rawText, documents: [] });
+            return res.status(200).json({ why: rawText, documents: ["Check scheme details for documents."] });
         }
     } else {
         return res.status(200).json({ reply: rawText });
