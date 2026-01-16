@@ -16,10 +16,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!apiKey) return res.status(500).json({ error: "Missing API Key" });
 
-    // 2. CONFIGURATION
-    // We use "gemini-1.5-flash-8b" which is the latest stable, high-speed model.
-    // If this ever fails, fallback to "gemini-1.5-flash-002"
-    const MODEL_NAME = "gemini-1.5-flash-8b"; 
+    // 2. CONFIGURATION: Use the PINNED version 'gemini-1.5-flash-002'
+    // This is the specific Sept 2024 release. It is more stable than the generic aliases.
+    const MODEL_NAME = "gemini-1.5-flash-002"; 
     
     let contents = [];
     let systemInstructionText = "";
@@ -71,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       generationConfig = {
         temperature: 0.3,
         maxOutputTokens: 1000,
-        responseMimeType: "application/json" // Forces valid JSON for the documents list
+        responseMimeType: "application/json"
       };
     } 
     else {
@@ -112,7 +111,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // --- HANDLE RESPONSE ---
     if (action === "analysis") {
         try {
-            // Parse the JSON to get the documents array
             const parsed = JSON.parse(rawText);
             return res.status(200).json({ 
                 why: parsed.explanation || "Analysis available.", 
