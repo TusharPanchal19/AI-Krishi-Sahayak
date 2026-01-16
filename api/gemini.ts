@@ -18,9 +18,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let contents = [];
     let systemInstructionText = "";
+    let generationConfig = {};
 
     // ==========================================
-    // CASE 1: CHATBOT
+    // CASE 1: CHATBOT (Standard Text)
     // ==========================================
     if (action === "chat") {
       const { history = [], newMessage } = payload;
@@ -33,37 +34,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })),
         { role: "user", parts: [{ text: newMessage }] }
       ];
+
+      generationConfig = {
+        temperature: 0.7,
+        maxOutputTokens: 2000
+      };
     } 
     
     // ==========================================
-    // CASE 2: SCHEME ANALYSIS (Fixes your Error)
+    // CASE 2: SCHEME ANALYSIS (Strict JSON)
     // ==========================================
     else if (action === "analysis") {
       const { farmerData, scheme, language } = payload;
-      systemInstructionText = "You are an expert government scheme analyst for Indian farmers.";
       
-      // Create a specific prompt for analysis
+      // We force the system to act as a JSON generator
+      systemInstructionText = "You are an API that outputs strictly valid JSON.";
+
       const analysisPrompt = `
-        Analyze the scheme "${scheme?.name || 'this scheme'}" for a farmer with these details:
+        Analyze the scheme "${scheme?.name || 'this scheme'}" for a farmer:
         - State: ${farmerData?.state}
-        - Crop: ${farmerData?.crop}
         - Income: ₹${farmerData?.income}
         
-        Explain strictly in 3-4 short bullet points why this scheme is specifically recommended for them.
-        ${language === 'hi' ? 'Reply in Hindi.' : 'Reply in English.'}
+        Return a valid JSON object with EXACTLY these two fields:
+        1. "explanation": A string with 3 bullet points explaining why it's recommended.
+        2. "documents": An array of strings listing required documents (e.g., ["Aadhar Card", "Land Record"]).
+
+        ${language === 'hi' ? 'Output values in Hindi.' : 'Output values in English.'}
       `;
 
       contents = [{ role: "user", parts: [{ text: analysisPrompt }] }];
-    }
-    
-    // CASE 3: UNSUPPORTED
+
+      generationConfig = {
+        temperature: 0.3,
+        maxOutputTokens: 1000,
+        responseMimeType: "application/json" // This forces the "documents" array to be created correctly
+      };
+    } 
     else {
       return res.status(400).json({ error: `Unsupported action: ${action}` });
     }
 
-    // --- CALL GEMINI API ---
+    // --- CALL GEMINI API (Switched back to 1.5-flash for stability) ---
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -76,10 +89,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
           ],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 1000 
-          }
+          generationConfig
         })
       }
     );
@@ -87,19 +97,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const data = await response.json();
 
     if (!response.ok) {
+        // If 1.5 Flash fails, check logs. 
         console.error("Gemini API Error:", JSON.stringify(data, null, 2));
         return res.status(response.status).json({ error: data.error?.message || "API Request Failed" });
     }
 
-    const textResponse = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Analysis not available.";
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    // --- RETURN RESPONSE BASED ON ACTION ---
+    if (!rawText) return res.status(500).json({ error: "Empty response" });
+
+    // --- HANDLE RESPONSE ---
     if (action === "analysis") {
-        // The frontend expects a 'why' field for analysis
-        return res.status(200).json({ why: textResponse, documents: [] });
+        try {
+            // Parse the JSON to get the documents array
+            const parsed = JSON.parse(rawText);
+            return res.status(200).json({ 
+                why: parsed.explanation || "Analysis available.", 
+                documents: parsed.documents || [] 
+            });
+        } catch (e) {
+            console.error("JSON Parsing Failed:", rawText);
+            return res.status(200).json({ why: rawText, documents: [] });
+        }
     } else {
-        // The chatbot expects a 'reply' field
-        return res.status(200).json({ reply: textResponse });
+        return res.status(200).json({ reply: rawText });
     }
 
   } catch (err: any) {
