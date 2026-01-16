@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // 1. Handle CORS (Optional but good for safety)
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -15,7 +14,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
-      console.error("API Key missing in environment variables");
+      console.error("API Key missing");
       return res.status(500).json({ error: "Server Configuration Error: Missing API Key" });
     }
 
@@ -25,7 +24,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { history = [], newMessage } = payload;
 
-    // 2. Formatting the conversation for Gemini
     const contents = [
       ...history.map((m: any) => ({
         role: m.role === "assistant" ? "model" : "user",
@@ -37,15 +35,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     ];
 
-    // 3. The FETCH Call (UPDATED)
+    // UPDATED: Using 'gemini-2.5-flash' instead of the retired 1.5 version
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents,
-          // CRITICAL FIX: Disable safety filters to prevent empty responses
           safetySettings: [
             { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
@@ -62,16 +59,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const data = await response.json();
 
-    // 4. Debugging: Log the raw response to Vercel Logs
     if (!response.ok) {
         console.error("Gemini API Error:", JSON.stringify(data, null, 2));
+        // Use a clearer error message for the frontend
         return res.status(response.status).json({ error: data.error?.message || "API Request Failed" });
     }
 
-    // 5. Extract text safely
     const candidate = data?.candidates?.[0];
     
-    // Check if it was blocked by safety
     if (candidate?.finishReason === "SAFETY") {
         return res.status(200).json({ reply: "I cannot answer this due to safety guidelines." });
     }
