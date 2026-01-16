@@ -3,7 +3,7 @@ import type { Language, ChatMessage } from '../types';
 import { translations } from '../constants/translations';
 import { getChatbotResponse } from '../services/geminiService';
 import { PaperAirplaneIcon, XMarkIcon } from './icons/Icons';
-// Import the new icons (or define them inline if you didn't create the file)
+// Ensure these are imported or defined (as per previous fix)
 const SpeakerWaveIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" />
@@ -27,7 +27,6 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [userInput, setUserInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  // Track which message is currently being spoken
   const [speakingId, setSpeakingId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -35,7 +34,6 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
     if (isOpen) {
       setMessages([{ role: 'model', content: t.chatbot_greeting }]);
     }
-    // Stop speech when chatbot closes
     return () => window.speechSynthesis.cancel();
   }, [isOpen, t.chatbot_greeting]);
   
@@ -45,20 +43,30 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
 
   useEffect(scrollToBottom, [messages]);
 
-  // --- NEW: Speech Function ---
+  // --- NEW: CLEANER FUNCTION ---
+  const cleanTextForSpeech = (text: string) => {
+    return text
+      .replace(/\*/g, '')      // Remove asterisks
+      .replace(/#/g, '')       // Remove hashtags
+      .replace(/`/g, '')       // Remove backticks
+      .replace(/-/g, '')       // Remove dashes (bullets)
+      .replace(/\n/g, '. ')    // Add pause for new lines
+      .replace(/\s+/g, ' ');   // Remove extra spaces
+  };
+
   const handleSpeak = (text: string, index: number) => {
-    // If currently speaking this message, stop it.
     if (speakingId === index) {
       window.speechSynthesis.cancel();
       setSpeakingId(null);
       return;
     }
 
-    // Stop any previous speech
     window.speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    // You can try to set a Hindi voice if available, otherwise it defaults
+    // USE THE CLEANER HERE
+    const cleanText = cleanTextForSpeech(text);
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+
     if (language === 'hi') {
       utterance.lang = 'hi-IN'; 
     } else {
@@ -69,7 +77,6 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
     setSpeakingId(index);
     window.speechSynthesis.speak(utterance);
   };
-  // -----------------------------
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,7 +103,6 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
 
   return (
     <div className="fixed bottom-24 right-6 w-[90vw] max-w-md h-[70vh] max-h-[600px] bg-white rounded-xl shadow-2xl flex flex-col z-50 transform transition-all duration-300 origin-bottom-right scale-100">
-      {/* Header */}
       <div className="flex justify-between items-center p-4 bg-green-700 text-white rounded-t-xl" style={{ backgroundColor: '#3b7a57' }}>
         <h3 className="font-bold text-lg">{t.chatbot_title}</h3>
         <button onClick={() => { window.speechSynthesis.cancel(); onClose(); }} className="p-1 hover:bg-green-600 rounded-full">
@@ -104,7 +110,6 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
         </button>
       </div>
 
-      {/* Messages */}
       <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
         <div className="space-y-4">
           {messages.map((msg, index) => (
@@ -112,7 +117,6 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
               <div className={`flex flex-col max-w-xs md:max-w-sm px-4 py-2 rounded-2xl break-words ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
                 <p className="text-sm" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
                 
-                {/* --- NEW: Speak Button (Only for AI messages) --- */}
                 {msg.role === 'model' && (
                   <div className="mt-2 flex justify-end">
                     <button 
@@ -128,7 +132,6 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
                     </button>
                   </div>
                 )}
-                {/* ----------------------------------------------- */}
 
               </div>
             </div>
@@ -137,7 +140,7 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
             <div className="flex justify-start">
                <div className="max-w-xs md:max-w-sm px-4 py-2 rounded-2xl bg-gray-200 text-gray-800">
                  <div className="flex items-center space-x-2">
-                     <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0s'}}></div>
+                     <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
                  </div>
@@ -148,7 +151,6 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
         </div>
       </div>
 
-      {/* Input */}
       <div className="p-4 border-t border-gray-200 bg-white rounded-b-xl">
         <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
           <input
