@@ -3,6 +3,8 @@ import type { Language, ChatMessage } from '../types';
 import { translations } from '../constants/translations';
 import { getChatbotResponse } from '../services/geminiService';
 import { PaperAirplaneIcon, XMarkIcon } from './icons/Icons';
+// Import the new icons (or define them inline if you didn't create the file)
+import { SpeakerWaveIcon, StopIcon } from './icons/Icons'; 
 
 interface ChatbotProps {
   isOpen: boolean;
@@ -15,12 +17,16 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [userInput, setUserInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // Track which message is currently being spoken
+  const [speakingId, setSpeakingId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
       setMessages([{ role: 'model', content: t.chatbot_greeting }]);
     }
+    // Stop speech when chatbot closes
+    return () => window.speechSynthesis.cancel();
   }, [isOpen, t.chatbot_greeting]);
   
   const scrollToBottom = () => {
@@ -28,6 +34,32 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
   };
 
   useEffect(scrollToBottom, [messages]);
+
+  // --- NEW: Speech Function ---
+  const handleSpeak = (text: string, index: number) => {
+    // If currently speaking this message, stop it.
+    if (speakingId === index) {
+      window.speechSynthesis.cancel();
+      setSpeakingId(null);
+      return;
+    }
+
+    // Stop any previous speech
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    // You can try to set a Hindi voice if available, otherwise it defaults
+    if (language === 'hi') {
+      utterance.lang = 'hi-IN'; 
+    } else {
+      utterance.lang = 'en-US';
+    }
+
+    utterance.onend = () => setSpeakingId(null);
+    setSpeakingId(index);
+    window.speechSynthesis.speak(utterance);
+  };
+  // -----------------------------
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,12 +71,12 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
     setIsLoading(true);
 
     try {
-      const history = newMessages.slice(1); // Exclude initial greeting
+      const history = newMessages.slice(1); 
       const response = await getChatbotResponse(history, userInput, language);
       setMessages(prev => [...prev, { role: 'model', content: response }]);
     } catch (error) {
       console.error(error);
-      setMessages(prev => [...prev, { role: 'model', content: "Sorry, I couldn't get a response. Please try again." }]);
+      setMessages(prev => [...prev, { role: 'model', content: "Sorry, I couldn't get a response." }]);
     } finally {
       setIsLoading(false);
     }
@@ -57,7 +89,7 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
       {/* Header */}
       <div className="flex justify-between items-center p-4 bg-green-700 text-white rounded-t-xl" style={{ backgroundColor: '#3b7a57' }}>
         <h3 className="font-bold text-lg">{t.chatbot_title}</h3>
-        <button onClick={onClose} className="p-1 hover:bg-green-600 rounded-full">
+        <button onClick={() => { window.speechSynthesis.cancel(); onClose(); }} className="p-1 hover:bg-green-600 rounded-full">
           <XMarkIcon className="w-6 h-6" />
         </button>
       </div>
@@ -67,19 +99,38 @@ export const Chatbot: React.FC<ChatbotProps> = ({ isOpen, onClose, language, t }
         <div className="space-y-4">
           {messages.map((msg, index) => (
             <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-xs md:max-w-sm px-4 py-2 rounded-2xl ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
+              <div className={`flex flex-col max-w-xs md:max-w-sm px-4 py-2 rounded-2xl break-words ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
                 <p className="text-sm" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                
+                {/* --- NEW: Speak Button (Only for AI messages) --- */}
+                {msg.role === 'model' && (
+                  <div className="mt-2 flex justify-end">
+                    <button 
+                      onClick={() => handleSpeak(msg.content, index)}
+                      className="p-1 rounded-full hover:bg-gray-300 text-gray-600 transition-colors"
+                      title="Read Aloud"
+                    >
+                      {speakingId === index ? (
+                         <StopIcon className="w-4 h-4 text-red-500" />
+                      ) : (
+                         <SpeakerWaveIcon className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                )}
+                {/* ----------------------------------------------- */}
+
               </div>
             </div>
           ))}
           {isLoading && (
             <div className="flex justify-start">
                <div className="max-w-xs md:max-w-sm px-4 py-2 rounded-2xl bg-gray-200 text-gray-800">
-                  <div className="flex items-center space-x-2">
+                 <div className="flex items-center space-x-2">
                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0s'}}></div>
                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
-                  </div>
+                 </div>
                </div>
             </div>
           )}
